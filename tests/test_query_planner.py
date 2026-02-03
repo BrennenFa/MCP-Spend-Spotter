@@ -9,71 +9,67 @@ from chat.agent_functions.sql.query_planner import (
     select_tool,
     explain_query_results
 )
-from chat.agent_functions.sql.validator import validate_sql_query
+from chat.agent_functions.validators.sql_validator import sql_validator
 from chat.agent_functions.validators.answer_validator import validate_query_results
 
 
 class TestValidateSQLQuery:
-    """Test SQL validation and security warnings."""
+    """Test SQL validation and blocking."""
 
     def test_validate_valid_select(self):
-        """Test that valid SELECT query passes with no warnings."""
+        """Test that valid SELECT query passes."""
         sql = "SELECT * FROM vendor_payments WHERE fiscal_year = '2023' LIMIT 10"
-        warnings = validate_sql_query(sql)
+        is_safe, warnings = sql_validator(sql)
+        assert is_safe is True
         assert len(warnings) == 0
 
-    def test_validate_warns_drop(self):
-        """Test that DROP statements generate warning."""
-        warnings = validate_sql_query("DROP TABLE vendor_payments")
+    def test_validate_blocks_drop(self):
+        """Test that DROP statements are blocked."""
+        is_safe, warnings = sql_validator("DROP TABLE vendor_payments")
+        assert is_safe is False
         assert len(warnings) > 0
         assert any("DROP" in w for w in warnings)
 
-    def test_validate_warns_delete(self):
-        """Test that DELETE statements generate warning."""
-        warnings = validate_sql_query("DELETE FROM vendor_payments WHERE id = 1")
+    def test_validate_blocks_delete(self):
+        """Test that DELETE statements are blocked."""
+        is_safe, warnings = sql_validator("DELETE FROM vendor_payments WHERE id = 1")
+        assert is_safe is False
         assert len(warnings) > 0
         assert any("DELETE" in w for w in warnings)
 
-    def test_validate_warns_update(self):
-        """Test that UPDATE statements generate warning."""
-        warnings = validate_sql_query("UPDATE vendor_payments SET payment = '0'")
+    def test_validate_blocks_update(self):
+        """Test that UPDATE statements are blocked."""
+        is_safe, warnings = sql_validator("UPDATE vendor_payments SET payment = '0'")
+        assert is_safe is False
         assert len(warnings) > 0
         assert any("UPDATE" in w for w in warnings)
 
-    def test_validate_warns_insert(self):
-        """Test that INSERT statements generate warning."""
-        warnings = validate_sql_query("INSERT INTO vendor_payments VALUES (1, 'test')")
+    def test_validate_blocks_insert(self):
+        """Test that INSERT statements are blocked."""
+        is_safe, warnings = sql_validator("INSERT INTO vendor_payments VALUES (1, 'test')")
+        assert is_safe is False
         assert len(warnings) > 0
         assert any("INSERT" in w for w in warnings)
 
-    def test_validate_warns_multiple_statements(self):
-        """Test that multiple statements generate warning."""
-        warnings = validate_sql_query("SELECT * FROM vendor_payments; SELECT * FROM budget;")
+    def test_validate_blocks_multiple_statements(self):
+        """Test that multiple statements are blocked."""
+        is_safe, warnings = sql_validator("SELECT * FROM vendor_payments; SELECT * FROM budget;")
+        assert is_safe is False
         assert len(warnings) > 0
         assert any("Multiple SQL statements" in w for w in warnings)
 
     def test_validate_allows_trailing_semicolon(self):
         """Test that trailing semicolon is allowed."""
         sql = "SELECT * FROM vendor_payments;"
-        warnings = validate_sql_query(sql)
-        # Should not warn about multiple statements for trailing semicolon
+        is_safe, warnings = sql_validator(sql)
+        assert is_safe is True
+        # Should not block for trailing semicolon
         assert not any("Multiple SQL statements" in w for w in warnings)
-
-    def test_validate_warns_non_select(self):
-        """Test that non-SELECT queries generate warning."""
-        warnings = validate_sql_query("SHOW TABLES")
-        assert len(warnings) > 0
-        assert any("Non-SELECT" in w for w in warnings)
-
-    def test_validate_warns_no_where_clause(self):
-        """Test that queries without WHERE or LIMIT generate warning."""
-        warnings = validate_sql_query("SELECT * FROM vendor_payments")
-        assert len(warnings) > 0
-        assert any("WHERE or LIMIT" in w for w in warnings)
 
     def test_validate_case_insensitive(self):
         """Test that validation is case-insensitive."""
-        warnings = validate_sql_query("drop table users")
+        is_safe, warnings = sql_validator("drop table users")
+        assert is_safe is False
         assert len(warnings) > 0
         assert any("DROP" in w for w in warnings)
 
@@ -160,18 +156,6 @@ class TestPlanQuery:
         assert result["tool"] == "query_vendor_payments"
         assert result["sql"] == "SELECT * FROM vendor_payments LIMIT 5"
         assert result["arguments"]["query"] == "SELECT * FROM vendor_payments LIMIT 5"
-        assert "warnings" in result
-
-    def test_plan_query_validates_sql(self, mock_llm_client):
-        """Test that plan_query validates destructive SQL (warns but doesn't block)."""
-        mock_llm_client.invoke.return_value.content = "DROP TABLE vendor_payments"
-
-        result = plan_query("delete everything", mock_llm_client)
-
-        # Should return result with warnings, not raise error
-        assert "warnings" in result
-        assert len(result["warnings"]) > 0
-        assert any("DROP" in w for w in result["warnings"])
 
     def test_plan_query_selects_correct_tool(self, mock_llm_client):
         """Test that plan_query selects tool based on table."""
