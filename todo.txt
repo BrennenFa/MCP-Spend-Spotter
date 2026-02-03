@@ -1,0 +1,2 @@
+1. implement more rag sources
+2. add more domain knowledge - guiding
