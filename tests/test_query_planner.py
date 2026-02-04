@@ -10,7 +10,7 @@ from chat.agent_functions.sql.query_planner import (
     explain_query_results
 )
 from chat.agent_functions.validators.sql_validator import sql_validator
-from chat.agent_functions.validators.answer_validator import validate_query_results
+from chat.agent_functions.validators.sql_validator import validate_query_results
 
 
 class TestValidateSQLQuery:
@@ -170,15 +170,16 @@ class TestValidateQueryResults:
     """Test query result validation."""
 
     def test_validate_results_empty(self):
-        """Test that empty results return no warnings."""
+        """Test that empty results with a SQL query flags EMPTY_RESULTS."""
         warnings = validate_query_results([], "SELECT * FROM vendor_payments")
-        assert len(warnings) == 0
+        assert len(warnings) == 1
+        assert "[EMPTY_RESULTS]" in warnings[0]
 
     def test_validate_results_valid_data(self):
         """Test that valid data returns no warnings."""
         results = [
-            {"fiscal_year": "2023", "payment": "$1,234.56"},
-            {"fiscal_year": "2024", "payment": "$5,678.90"}
+            {"fiscal_year": "2024", "payment": "$1,234.56"},
+            {"fiscal_year": "2025", "payment": "$5,678.90"}
         ]
         warnings = validate_query_results(results, "SELECT * FROM vendor_payments")
         assert len(warnings) == 0
@@ -186,7 +187,7 @@ class TestValidateQueryResults:
     def test_validate_results_negative_payment(self):
         """Test that negative monetary values generate warning."""
         results = [
-            {"fiscal_year": "2023", "payment": -1234.56}
+            {"fiscal_year": "2024", "payment": -1234.56}
         ]
         warnings = validate_query_results(results, "SELECT * FROM vendor_payments")
         assert len(warnings) > 0
@@ -212,7 +213,7 @@ class TestValidateQueryResults:
     def test_validate_results_negative_expenditures(self):
         """Test that negative expenditures generate warning."""
         results = [
-            {"fiscal_year": "2023", "expenditures": -50000}
+            {"fiscal_year": "2024", "expenditures": -50000}
         ]
         warnings = validate_query_results(results, "SELECT * FROM budget")
         assert len(warnings) > 0

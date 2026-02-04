@@ -6,7 +6,6 @@ import logging
 from typing import Dict, Any, List
 from langchain_groq import ChatGroq
 from chat.tools import execute_vendor_query, execute_budget_query
-from chat.agent_functions.sql.validator import validate_sql_query
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +22,7 @@ def plan_query(user_query: str, llm_client: ChatGroq) -> Dict[str, Any]:
         {
             "tool": "query_vendor_payments" | "query_budget",
             "sql": "SELECT ...",  # LLM-generated SQL
-            "arguments": {"query": "SELECT ..."},
-            "warnings": ["warning1", "warning2", ...]  # Validation warnings
+            "arguments": {"query": "SELECT ..."}
         }
     """
     try:
@@ -32,11 +30,6 @@ def plan_query(user_query: str, llm_client: ChatGroq) -> Dict[str, Any]:
         sql = generate_sql_with_llm(user_query, llm_client)
         logger.info(f"[SQL_PLANNER] Generated SQL: {sql}")
 
-        # Validate SQL (warnings only, non-blocking)
-        warnings = validate_sql_query(sql)
-        for warning in warnings:
-            logger.warning(warning)
-            print(warning, file=sys.stderr)
 
         # Determine which tool to use based on table
         tool = select_tool(sql)
@@ -46,7 +39,6 @@ def plan_query(user_query: str, llm_client: ChatGroq) -> Dict[str, Any]:
             "tool": tool,
             "sql": sql,
             "arguments": {"query": sql},
-            "warnings": warnings  # Include warnings in response
         }
 
     except Exception as e:

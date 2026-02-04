@@ -1,4 +1,4 @@
-"""Unified answer validation module for LangGraph workflow."""
+"""Answer grounding validators for LangGraph workflow."""
 
 import json
 import logging
@@ -6,66 +6,6 @@ from typing import List, Dict, Any
 from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
-
-
-def validate_query_results(results: List[Dict], sql: str) -> List[str]:
-    """
-    Validate query results for data sanity.
-    (Moved from chat/agent_functions/sql/validator.py)
-
-    Checks for:
-    - Negative monetary values (payments, expenditures, etc.)
-    - Invalid fiscal years (outside reasonable range)
-    - Null/empty critical fields
-    - Suspiciously large values
-
-    Args:
-        results: Query results as list of dicts
-        sql: SQL query that generated results
-
-    Returns:
-        List of warning messages (empty if no issues)
-    """
-    warnings = []
-
-    if not results or len(results) == 0:
-        return warnings
-
-    # Check first few rows for common issues
-    sample_size = min(10, len(results))
-    sample = results[:sample_size]
-
-    for i, row in enumerate(sample):
-        # Check for negative monetary values
-        money_fields = ['payment', 'expenditures', 'receipts', 'net_appropriations', 'total', 'amount']
-        for field in money_fields:
-            if field in row:
-                value = row[field]
-                # Parse numeric value
-                if isinstance(value, str):
-                    try:
-                        value = float(value.replace('$', '').replace(',', ''))
-                    except:
-                        continue
-
-                if isinstance(value, (int, float)) and value < 0:
-                    warnings.append(f"[RESULT_VALIDATOR] WARNING: Negative monetary value in row {i+1}: {field}={value}")
-
-        # Check for invalid fiscal years
-        if 'fiscal_year' in row:
-            year = row['fiscal_year']
-            try:
-                year_int = int(year) if isinstance(year, str) else year
-                if year_int < 2000 or year_int > 2030:
-                    warnings.append(f"[RESULT_VALIDATOR] WARNING: Suspicious fiscal year in row {i+1}: {year}")
-            except:
-                warnings.append(f"[RESULT_VALIDATOR] WARNING: Invalid fiscal year format in row {i+1}: {year}")
-
-    # Check for suspiciously large result sets
-    if len(results) > 10000:
-        warnings.append(f"[RESULT_VALIDATOR] WARNING: Large result set returned ({len(results)} rows) - may impact performance")
-
-    return warnings
 
 
 def validate_data_grounding(
@@ -211,6 +151,7 @@ Your response:"""
             # Extract hallucination lines
             for line in context_check_result.split('\n'):
                 if line.strip().startswith('HALLUCINATION:'):
+                    # hallucination formating
                     hallucination = line.replace('HALLUCINATION:', '').strip()
                     warnings.append(f"[CONTEXT_GROUNDING] WARNING: {hallucination}")
 

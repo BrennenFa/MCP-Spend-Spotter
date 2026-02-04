@@ -11,6 +11,7 @@ from .implementations import (
     create_graph_from_results,
     query_budget_context
 )
+from chat.agent_functions.validators.sql_validator import sql_validator
 
 # Import SQL query planner functions
 from pathlib import Path
@@ -160,10 +161,21 @@ def handle_query_sql(arguments: Dict[str, Any], agent_state) -> Dict[str, Any]:
         query_plan = plan_query(user_query, agent_state.llm_client)
         logger.info(f"[NC_BUDGET] [SQL] Query plan: {query_plan['tool']} - {query_plan['sql']}")
 
-        # Log SQL validation warnings
-        sql_warnings = query_plan.get('warnings', [])
-        for warning in sql_warnings:
-            logger.warning(warning)
+        # sql blocking check
+        is_safe, safety_warnings = sql_validator(query_plan['sql'])
+        
+        if not is_safe:
+            error_msg = "; ".join(safety_warnings)
+            logger.error(f"[NC_BUDGET] [SQL] BLOCKED: {error_msg}")
+            return {
+                "content": [{"type": "text", "text": json.dumps({
+                    "explanation": f"Query blocked for safety: {error_msg}",
+                    "query": query_plan['sql'],
+                    "results": []
+                })}],
+                "isError": True
+            }
+
 
         # Execute using the selected tool
         if query_plan['tool'] == 'query_vendor_payments':
@@ -198,8 +210,7 @@ def handle_query_sql(arguments: Dict[str, Any], agent_state) -> Dict[str, Any]:
                         "explanation": explanation,
                         "query": query_plan['sql'],
                         "results": results,
-                        "tool_used": query_plan['tool'],
-                        "warnings": sql_warnings  # SQL warnings only (result validation moved to LangGraph)
+                        "tool_used": query_plan['tool']
                     })
                 }
             ]
