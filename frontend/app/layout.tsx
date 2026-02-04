@@ -4,7 +4,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import Header from "@/components/Header";
 
 export const metadata: Metadata = {
-  title: "NC Spend Spotter",
+  title: "NC Spend Tracker",
   description: "Explore North Carolina state budget and vendor payment data with AI assistance",
 };
 
