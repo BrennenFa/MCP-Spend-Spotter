@@ -9,35 +9,35 @@ logger = logging.getLogger(__name__)
 def sql_validator(sql: str) -> Tuple[bool, List[str]]:
     """
     Check SQL for dangerous operations and BLOCK if found.
-    
+
     This is a BLOCKING check - if dangerous operations are detected,
     the query should NOT be executed.
-    
+
     Args:
         sql: SQL query to check
-        
+
     Returns:
         (is_safe, warnings) - is_safe=False means query should be BLOCKED
     """
     warnings = []
     sql_upper = sql.upper().strip()
-    
+
     # Check for destructive keywords
     destructive_keywords = [
         'DROP', 'DELETE', 'INSERT', 'UPDATE', 'ALTER',
         'CREATE', 'TRUNCATE', 'REPLACE', 'MERGE'
     ]
-    
+
     for keyword in destructive_keywords:
         if f' {keyword} ' in f' {sql_upper} ' or sql_upper.startswith(keyword + ' '):
             warnings.append(f"[SQL_SAFETY] BLOCKED: Destructive operation '{keyword}' detected in query")
             return (False, warnings)
-    
+
     # Check for multiple statements - sql injection risk
     if ';' in sql.rstrip(';'):
         warnings.append("[SQL_SAFETY] BLOCKED: Multiple SQL statements detected (SQL injection risk)")
         return (False, warnings)
-    
+
     return (True, warnings)
 
 
