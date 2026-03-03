@@ -9,8 +9,8 @@ from .implementations import (
     execute_vendor_query,
     execute_budget_query,
     create_graph_from_results,
-    query_budget_context
 )
+from chat.agent_functions.rag.rag_query import query_budget_context
 from chat.agent_functions.validators.sql_validator import sql_validator
 
 # Import SQL query planner functions
