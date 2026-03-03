@@ -62,4 +62,3 @@ def mock_env_vars(monkeypatch):
     """Set up environment variables for testing."""
     monkeypatch.setenv('GROQ_KEY', 'test-groq-key-123')
     monkeypatch.setenv('MODEL_NAME', 'llama-3.1-8b-instant')
-    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-anthropic-key-123')

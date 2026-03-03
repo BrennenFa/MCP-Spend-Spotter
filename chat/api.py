@@ -70,10 +70,8 @@ async def startup_event():
     # Check env vars
     groq_key = os.getenv("GROQ_KEY")
     backend_key = os.getenv("BACKEND_API_KEY")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
     print(f"GROQ_KEY: {'Set' if groq_key else 'NOT SET'}")
     print(f"BACKEND_API_KEY: {'Set' if backend_key else 'NOT SET'}")
-    print(f"ANTHROPIC_API_KEY: {'Set' if anthropic_key else 'NOT SET'}")
 
     try:
         claude_system = ClaudeAgentSystem()
@@ -182,7 +180,6 @@ async def health():
         "agents": {},
         "env_vars": {
             "GROQ_KEY": "set" if os.getenv("GROQ_KEY") else "NOT SET",
-            "ANTHROPIC_API_KEY": "set" if os.getenv("ANTHROPIC_API_KEY") else "NOT SET",
             "BACKEND_API_KEY": "set" if os.getenv("BACKEND_API_KEY") else "NOT SET",
             "FRONTEND_URL": os.getenv("FRONTEND_URL", "not set")
         }

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, List, TypedDict, Annotated, Literal
 from dotenv import load_dotenv
 
-from langchain_anthropic import ChatAnthropic
+from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 
 from chat.agents.agent_client import AgentPool
@@ -34,14 +34,15 @@ class ClaudeAgentSystem:
     def __init__(self):
         """Initialize LangGraph workflow and agent pool."""
 
-        # Check for Anthropic API key
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        # Check for Groq API key
+        api_key = os.getenv("GROQ_KEY")
         if not api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY not set in .env\n")
+            raise RuntimeError("GROQ_KEY not set in .env\n")
 
-        # Initialize ChatAnthropic model
-        self.llm = ChatAnthropic(
-            model="claude-3-5-haiku-20241022",
+        # Initialize ChatGroq model
+        model_name = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
+        self.llm = ChatGroq(
+            model=model_name,
             api_key=api_key,
             max_tokens=2500,
             temperature=0
