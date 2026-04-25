@@ -167,7 +167,9 @@ class ClaudeAgentSystem:
             "query_results": [],
             "sql_query": "",
             "graph_data": "",
+            "visualization_status": "not_created",
             "context_data": "",
+            "citations": [],
             "final_answer": "",
             "validation_warnings": [],
             "retry_count": 0,
@@ -186,6 +188,8 @@ class ClaudeAgentSystem:
                 "answer": final_state.get("final_answer", ""),  # LLM-generated response text
                 "data": final_state.get("query_results"),  # SQL query results (list of dicts)
                 "graph": final_state.get("graph_data"),  # Base64-encoded PNG image (optional)
+                "visualization_status": final_state.get("visualization_status", "not_created"),
+                "citations": final_state.get("citations", []),
                 "sql_query": final_state.get("sql_query"),  # Executed SQL query string (optional)
                 "validation_warnings": final_state.get("validation_warnings", [])  # Answer validation warnings
             }
@@ -204,6 +208,8 @@ class ClaudeAgentSystem:
                 "answer": error_msg,
                 "data": None,
                 "graph": None,
+                "visualization_status": "not_created",
+                "citations": [],
                 "sql_query": None,
                 "validation_warnings": []
             }

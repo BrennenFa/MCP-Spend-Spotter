@@ -3,6 +3,9 @@ Graph nodes and state definition for the Claude agent system.
 """
 import json
 import sys
+import threading
+from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, TypedDict, Annotated, Literal
 from langchain_core.messages import HumanMessage, BaseMessage
 from langgraph.graph.message import add_messages
@@ -25,7 +28,9 @@ class GraphState(TypedDict):
     query_results: List[Dict]  # Results from database query
     sql_query: str  # SQL query executed
     graph_data: str  # Base64-encoded graph image
+    visualization_status: str  # "created" | "not_created"
     context_data: str  # Results from RAG search
+    citations: List[Dict[str, Any]]  # Structured citation objects for final response
     final_answer: str  # Final response to user
 
 
@@ -42,6 +47,9 @@ class GraphNodes:
     def __init__(self, llm, agent_pool):
         self.llm = llm
         self.agent_pool = agent_pool
+        self._graph_executor = ThreadPoolExecutor(max_workers=4)
+        self._graph_futures: Dict[str, Any] = {}
+        self._graph_lock = threading.Lock()
 
     def _call_agent_tool(self, tool_name: str, tool_input: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """Call a tool via the unified NC Budget agent."""
@@ -87,6 +95,75 @@ class GraphNodes:
 
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    def _build_sql_citations(self, state: GraphState) -> List[Dict[str, Any]]:
+        """Create deterministic citations from SQL query + result rows."""
+        citations: List[Dict[str, Any]] = []
+        sql_query = (state.get("sql_query") or "").strip()
+        results = state.get("query_results") or []
+
+        if not sql_query:
+            return citations
+
+        table = "unknown"
+        sql_lower = sql_query.lower()
+        if "vendor_payments" in sql_lower:
+            table = "vendor_payments"
+        elif " budget" in sql_lower or "from budget" in sql_lower:
+            table = "budget"
+
+        citations.append({
+            "id": 0,
+            "kind": "sql",
+            "title": "Executed SQL Query",
+            "detail": f"Table: {table}; {sql_query}"
+        })
+
+        for i, row in enumerate(results[:2], 1):
+            # Include a compact evidence row snapshot (first 3 columns).
+            fields = list(row.items())[:3]
+            row_detail = ", ".join([f"{k}={v}" for k, v in fields])
+            citations.append({
+                "id": 0,
+                "kind": "sql",
+                "title": f"Result Row {i}",
+                "detail": row_detail
+            })
+
+        return citations
+
+    def _extract_rag_citations(self, state: GraphState) -> List[Dict[str, Any]]:
+        """Extract citations from RAG context payload if present."""
+        citations: List[Dict[str, Any]] = []
+        context_data = state.get("context_data", "")
+        if not context_data:
+            return citations
+        try:
+            parsed = json.loads(context_data)
+        except json.JSONDecodeError:
+            return citations
+
+        raw_citations = parsed.get("citations", [])
+        if not isinstance(raw_citations, list):
+            return citations
+
+        for citation in raw_citations:
+            if not isinstance(citation, dict):
+                continue
+            citations.append({
+                "id": 0,
+                "kind": "rag",
+                "title": citation.get("title", "Budget Document"),
+                "detail": citation.get("detail", "")
+            })
+        return citations
+
+    def _build_citations(self, state: GraphState) -> List[Dict[str, Any]]:
+        """Compose and re-index citations for final response."""
+        combined = self._build_sql_citations(state) + self._extract_rag_citations(state)
+        for idx, citation in enumerate(combined, 1):
+            citation["id"] = idx
+        return combined
 
 
     def route_question(self, state: GraphState) -> GraphState:
@@ -207,24 +284,35 @@ visualization: <yes/no>"""
         return "respond"
 
     def create_graph(self, state: GraphState) -> GraphState:
-        """Create visualization from query results."""
+        """Kick off visualization creation in background for overlap with answer generation."""
         print(f"[NODE] Creating visualization for {len(state['query_results'])} rows")
+        session_id = state.get("session_id", "default")
+        graph_state = deepcopy(state)
 
-        result = self._call_agent_tool(
-            "create_graph",
-            {
-                "data": state["query_results"],
-                "sql_query": state["sql_query"],
-                "title": None
-            },
-            state["session_id"]
-        )
+        def _graph_job() -> str:
+            result = self._call_agent_tool(
+                "create_graph",
+                {
+                    "data": graph_state.get("query_results", []),
+                    "sql_query": graph_state.get("sql_query", ""),
+                    "title": None
+                },
+                graph_state.get("session_id", "default")
+            )
 
-        if result.get("success"):  # Check if agent call succeeded
-            tool_result = result.get("result", {})  # Extract already-parsed result object
-            if isinstance(tool_result, dict):
-                state["graph_data"] = tool_result.get("graph")  # Extract base64 PNG data
-                print(f"[NODE] Graph created successfully")
+            if result.get("success"):
+                tool_result = result.get("result", {})
+                if isinstance(tool_result, dict):
+                    return tool_result.get("graph") or ""
+            return ""
+
+        with self._graph_lock:
+            previous = self._graph_futures.pop(session_id, None)
+            if previous and not previous.done():
+                previous.cancel()
+            self._graph_futures[session_id] = self._graph_executor.submit(_graph_job)
+
+        print(f"[NODE] Graph generation started in background")
 
         return state
 
@@ -242,8 +330,10 @@ visualization: <yes/no>"""
             tool_result = result.get("result", {})  # Extract already-parsed result
             if isinstance(tool_result, str):
                 state["context_data"] = tool_result
+                state["citations"] = []
             elif isinstance(tool_result, dict):
                 state["context_data"] = json.dumps(tool_result)
+                state["citations"] = self._extract_rag_citations(state)
             print(f"[NODE] Context retrieved")
 
         return state
@@ -278,16 +368,15 @@ visualization: <yes/no>"""
             # Include SQL query
             context_parts.append(f"\nSQL Query: {state.get('sql_query', 'N/A')}")
 
-        # check for graph results
-        if state.get("graph_data"):
-            context_parts.append("\n[A visualization has been created for this data]")
-
         # check for rag context data
         if state.get("context_data"):
             context_parts.append(f"\nContext Information:\n{state['context_data']}")
 
         # combine all parts
         context = "\n\n".join(context_parts)
+        citations = self._build_citations(state)
+        state["citations"] = citations
+        citation_map = "\n".join([f"[{c['id']}] {c['title']} — {c['detail']}" for c in citations]) if citations else "None"
 
         # Generate answer
         prompt = f"""Based on the following data, answer the user's question concisely and clearly.
@@ -297,16 +386,37 @@ User Question: {state['user_query']}
 Data:
 {context}
 
+Available Citations:
+{citation_map}
+
 Instructions:
 - Provide a clear, direct answer
 - Reference specific numbers/facts from the data
-- If a visualization was created, mention it briefly
+- Do not state whether a visualization was created
+- Add inline citation markers like [1], [2] for factual claims when citations are available
 - Keep the answer concise (2-4 sentences)
 {correction_prompt}"""
 
         # invoke an llm response
         response = self.llm.invoke([HumanMessage(content=prompt)])
         state["final_answer"] = response.content
+
+        # If a background graph job exists for this session, resolve it now.
+        session_id = state.get("session_id", "default")
+        graph_future = None
+        with self._graph_lock:
+            graph_future = self._graph_futures.pop(session_id, None)
+
+        if graph_future is not None:
+            try:
+                graph_data = graph_future.result()
+                if graph_data:
+                    state["graph_data"] = graph_data
+                    print(f"[NODE] Graph created successfully")
+            except Exception as e:
+                print(f"[NODE] Graph generation failed: {e}", file=sys.stderr)
+
+        state["visualization_status"] = "created" if state.get("graph_data") else "not_created"
 
         print(f"[NODE] Response generated")
         return state
@@ -371,6 +481,7 @@ Instructions:
 
         response = self.llm.invoke([HumanMessage(content=state["user_query"])])
         state["final_answer"] = response.content
+        state["citations"] = []
 
         return state
 

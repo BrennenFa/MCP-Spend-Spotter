@@ -10,6 +10,7 @@ interface MessageBubbleProps {
 
 export default function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user'
+  const visualizationCreated = message.visualizationStatus === 'created' || Boolean(message.graph)
 
   return (
     <div className={`mb-8 ${isUser ? 'flex justify-end' : 'flex justify-start'}`}>
@@ -60,9 +61,39 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                 </ReactMarkdown>
               </div>
 
+              {!!message.citations?.length && (
+                <div className="px-5 pb-2">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                    Sources
+                  </h4>
+                  <ol className="list-decimal ml-5 text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                    {message.citations.map((citation) => (
+                      <li key={`${citation.kind}-${citation.id}`}>
+                        <span className="font-medium">{citation.title}</span>
+                        {citation.detail ? ` — ${citation.detail}` : ''}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
               {/* Data/Graph section - with visual separation */}
               {(message.data || message.graph || message.sqlQuery) && (
                 <div className="border-t border-gray-200 dark:border-gray-700 pt-4 pb-2">
+                  {!isUser && message.visualizationStatus && (
+                    <div className="px-5 mb-3">
+                      <span
+                        className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
+                          visualizationCreated
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
+                            : 'bg-gray-100 text-gray-700 dark:bg-gray-700/50 dark:text-gray-300'
+                        }`}
+                      >
+                        {visualizationCreated ? 'Visualization included' : 'No visualization generated'}
+                      </span>
+                    </div>
+                  )}
+
                   {/* Graph visualization */}
                   {message.graph && (
                     <div className="px-5 mb-4">

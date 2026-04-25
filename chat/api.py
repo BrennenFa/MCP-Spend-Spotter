@@ -114,6 +114,8 @@ class ChatResponse(BaseModel):
     answer: str = Field(..., description="AI-generated answer")
     data: Optional[List[Dict]] = Field(default=None, description="Query result data (if any)")
     graph: Optional[str] = Field(default=None, description="Base64-encoded PNG graph (if applicable)")
+    visualization_status: Optional[str] = Field(default="not_created", description="'created' when graph exists, otherwise 'not_created'")
+    citations: Optional[List[Dict]] = Field(default=None, description="Structured citations used in the answer")
     sql_query: Optional[str] = Field(default=None, description="SQL query that was executed (if any)")
 
     # track token usage
@@ -254,6 +256,8 @@ async def chat(
             answer=result.get("answer", ""),
             data=result.get("data"),
             graph=result.get("graph"),
+            visualization_status=result.get("visualization_status", "not_created"),
+            citations=result.get("citations", []),
             sql_query=result.get("sql_query"),
             tokens_used=0,  # TODO: Track tokens from Anthropic API
             prompt_tokens=0,

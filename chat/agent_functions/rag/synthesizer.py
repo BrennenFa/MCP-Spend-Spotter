@@ -40,8 +40,7 @@ class RAGSynthesizer:
         # Build context from chunks
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
-
-            context_parts.append(f"\n{chunk['text']}\n")
+            context_parts.append(f"\n[Chunk {i}]\n{chunk['text']}\n")
 
         context = "\n".join(context_parts)
 
@@ -52,7 +51,7 @@ based ONLY on the provided context.
 
 RULES:
 1. ONLY use information from the context chunks below
-2. Cite sections when referencing information (e.g., "According to [Chunk 2]...")
+2. Cite supporting chunks inline using bracket markers (e.g., [1], [2])
 3. If context doesn't fully answer the question, acknowledge the limitation
 4. Explain budget terminology clearly (gross vs net expenditures, fund types, receipts, etc.)
 5. Be concise but thorough - aim for 2-4 paragraphs

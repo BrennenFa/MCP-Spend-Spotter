@@ -55,6 +55,8 @@ export default function ChatInterface() {
         content: data.answer,
         data: data.data,  // Add query results data
         graph: data.graph,
+        visualizationStatus: data.visualization_status,
+        citations: data.citations,
         sqlQuery: data.sql_query,
         timestamp: new Date()
       }

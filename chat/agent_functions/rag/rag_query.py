@@ -59,10 +59,26 @@ def query_budget_context(
             chat_history=chat_history
         )
 
+        citations = []
+        for i, chunk in enumerate(chunks, 1):
+            metadata = chunk.get("metadata", {}) or {}
+            section = metadata.get("Section", "Budget Document")
+            subsection = metadata.get("SubSection", "")
+            title = section
+            if subsection:
+                title = f"{section} > {subsection}"
+            citations.append({
+                "id": i,
+                "kind": "rag",
+                "title": title,
+                "detail": f"Budget docs chunk {i}"
+            })
+
         return {
             "answer": answer,
             "chunks_used": len(chunks),
-            "keywords": keywords
+            "keywords": keywords,
+            "citations": citations
         }
 
     except Exception as e:
