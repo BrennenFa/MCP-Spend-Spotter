@@ -97,37 +97,34 @@ class GraphNodes:
             return {"success": False, "error": str(e)}
 
     def _build_sql_citations(self, state: GraphState) -> List[Dict[str, Any]]:
-        """Create deterministic citations from SQL query + result rows."""
+        """Create deterministic SQL citations from source dataset provenance."""
         citations: List[Dict[str, Any]] = []
         sql_query = (state.get("sql_query") or "").strip()
-        results = state.get("query_results") or []
 
         if not sql_query:
             return citations
 
-        table = "unknown"
         sql_lower = sql_query.lower()
         if "vendor_payments" in sql_lower:
-            table = "vendor_payments"
-        elif " budget" in sql_lower or "from budget" in sql_lower:
-            table = "budget"
-
-        citations.append({
-            "id": 0,
-            "kind": "sql",
-            "title": "Executed SQL Query",
-            "detail": f"Table: {table}; {sql_query}"
-        })
-
-        for i, row in enumerate(results[:2], 1):
-            # Include a compact evidence row snapshot (first 3 columns).
-            fields = list(row.items())[:3]
-            row_detail = ", ".join([f"{k}={v}" for k, v in fields])
             citations.append({
                 "id": 0,
                 "kind": "sql",
-                "title": f"Result Row {i}",
-                "detail": row_detail
+                "title": "Vendor Payments CSV Sources",
+                "detail": "data/vendor_data.csv; data/Key value - Payment 1y.csv; data/Key value - Payment 1ya.csv"
+            })
+        elif " budget" in sql_lower or "from budget" in sql_lower:
+            citations.append({
+                "id": 0,
+                "kind": "sql",
+                "title": "Budget CSV Sources",
+                "detail": "data/budget_data.csv; data/budget2024.csv"
+            })
+        else:
+            citations.append({
+                "id": 0,
+                "kind": "sql",
+                "title": "Database Source",
+                "detail": "SQLite tables populated from project CSV files in data/"
             })
 
         return citations
@@ -160,7 +157,8 @@ class GraphNodes:
 
     def _build_citations(self, state: GraphState) -> List[Dict[str, Any]]:
         """Compose and re-index citations for final response."""
-        combined = self._build_sql_citations(state) + self._extract_rag_citations(state)
+        # RAG-only citations for now. SQL/source-provenance mapping will be added later.
+        combined = self._extract_rag_citations(state)
         for idx, citation in enumerate(combined, 1):
             citation["id"] = idx
         return combined

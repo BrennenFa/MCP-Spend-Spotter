@@ -67,11 +67,15 @@ def query_budget_context(
             title = section
             if subsection:
                 title = f"{section} > {subsection}"
+            chunk_text = (chunk.get("text") or "").strip().replace("\n", " ")
+            excerpt = chunk_text[:180].strip()
+            if len(chunk_text) > 180:
+                excerpt += "..."
             citations.append({
                 "id": i,
                 "kind": "rag",
                 "title": title,
-                "detail": f"Budget docs chunk {i}"
+                "detail": f"\"{excerpt}\"" if excerpt else f"Budget docs chunk {i}"
             })
 
         return {
