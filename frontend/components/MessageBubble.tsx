@@ -10,7 +10,6 @@ interface MessageBubbleProps {
 
 export default function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user'
-  const visualizationCreated = message.visualizationStatus === 'created' || Boolean(message.graph)
 
   return (
     <div className={`mb-8 ${isUser ? 'flex justify-end' : 'flex justify-start'}`}>
@@ -80,20 +79,6 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
               {/* Data/Graph section - with visual separation */}
               {(message.data || message.graph || message.sqlQuery) && (
                 <div className="border-t border-gray-200 dark:border-gray-700 pt-4 pb-2">
-                  {!isUser && message.visualizationStatus && (
-                    <div className="px-5 mb-3">
-                      <span
-                        className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${
-                          visualizationCreated
-                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
-                            : 'bg-gray-100 text-gray-700 dark:bg-gray-700/50 dark:text-gray-300'
-                        }`}
-                      >
-                        {visualizationCreated ? 'Visualization included' : 'No visualization generated'}
-                      </span>
-                    </div>
-                  )}
-
                   {/* Graph visualization */}
                   {message.graph && (
                     <div className="px-5 mb-4">

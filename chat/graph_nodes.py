@@ -6,7 +6,7 @@ import sys
 import threading
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, List, TypedDict, Annotated, Literal
+from typing import Dict, Any, List, TypedDict, Annotated, Literal, Optional
 from langchain_core.messages import HumanMessage, BaseMessage
 from langgraph.graph.message import add_messages
 from chat.session_manager import session_manager
@@ -29,6 +29,7 @@ class GraphState(TypedDict):
     sql_query: str  # SQL query executed
     graph_data: str  # Base64-encoded graph image
     visualization_status: str  # "created" | "not_created"
+    visualization_decision: Dict[str, Any]  # Post-query visualization decision/chart spec
     context_data: str  # Results from RAG search
     citations: List[Dict[str, Any]]  # Structured citation objects for final response
     final_answer: str  # Final response to user
@@ -72,6 +73,7 @@ class GraphNodes:
                 arguments = {
                     "results": tool_input.get("data", []),
                     "query": tool_input.get("sql_query", ""),
+                    "chart_spec": tool_input.get("chart_spec"),
                     "title": tool_input.get("title"),
                     "chat_history": chat_history
                 }
@@ -162,6 +164,75 @@ class GraphNodes:
         for idx, citation in enumerate(combined, 1):
             citation["id"] = idx
         return combined
+
+    def _extract_json_object(self, text: str) -> Optional[Dict[str, Any]]:
+        """Extract the first JSON object from an LLM response."""
+        if not text:
+            return None
+
+        text = text.strip()
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+
+        try:
+            parsed = json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _default_visualization_decision(self, state: GraphState, requested: bool = False) -> Dict[str, Any]:
+        """Fallback visualization decision."""
+        decision: Dict[str, Any] = {
+            "should_visualize": False,
+            "chart_type": "",
+            "x_field": "",
+            "y_field": "",
+            "analysis_goal": "",
+            "title": "",
+            "no_graph_explanation": ""
+        }
+        if requested:
+            decision["no_graph_explanation"] = (
+                "I couldn't identify a graph that would clarify these results without being misleading or redundant."
+            )
+        return decision
+
+    def _normalize_visualization_decision(self, raw: Dict[str, Any], requested: bool) -> Dict[str, Any]:
+        """Normalize LLM decision output to the internal schema."""
+        decision = self._default_visualization_decision({}, requested=requested)
+
+        should_visualize = raw.get("should_visualize", False)
+        if isinstance(should_visualize, str):
+            should_visualize = should_visualize.strip().lower() == "true"
+        decision["should_visualize"] = bool(should_visualize)
+
+        for key in ("chart_type", "x_field", "y_field", "analysis_goal", "title", "no_graph_explanation"):
+            value = raw.get(key, "")
+            decision[key] = value.strip() if isinstance(value, str) else ""
+
+        if decision["analysis_goal"] == "" and isinstance(raw.get("aggregation_intent"), str):
+            decision["analysis_goal"] = raw["aggregation_intent"].strip()
+
+        if decision["should_visualize"]:
+            required = ("chart_type", "x_field", "y_field", "analysis_goal")
+            if not all(decision.get(key) for key in required):
+                return self._default_visualization_decision({}, requested=requested)
+            return decision
+
+        if requested and not decision["no_graph_explanation"]:
+            decision["no_graph_explanation"] = (
+                "I couldn't identify a graph that would clarify these results without being misleading or redundant."
+            )
+        return decision
 
 
     def route_question(self, state: GraphState) -> GraphState:
@@ -275,11 +346,78 @@ visualization: <yes/no>"""
         if state.get("query_error"):
             return "blocked"
 
-        results = state.get("query_results", [])
-        wants_viz = state.get("wants_visualization", False)
-        if wants_viz or len(results) > 4:
+        decision = state.get("visualization_decision", {})
+        if decision.get("should_visualize"):
             return "visualize"
         return "respond"
+
+    def assess_visualization(self, state: GraphState) -> GraphState:
+        """Grounded post-query visualization decision."""
+        if state.get("query_error"):
+            state["visualization_decision"] = self._default_visualization_decision(
+                state,
+                requested=state.get("wants_visualization", False)
+            )
+            return state
+
+        results = state.get("query_results", [])
+        requested = state.get("wants_visualization", False)
+        if not results:
+            state["visualization_decision"] = self._default_visualization_decision(
+                state,
+                requested=requested
+            )
+            return state
+
+        print(f"[NODE] Assessing visualization need for {len(results)} rows")
+        result_sample = json.dumps(results[:15], indent=2)
+        prompt = f"""You are deciding whether a chart should be included for a SQL answer.
+
+User question:
+{state["user_query"]}
+
+User explicitly requested a visualization:
+{"yes" if requested else "no"}
+
+SQL query:
+{state.get("sql_query", "")}
+
+Result sample:
+{result_sample}
+
+Rules:
+- Decide based on the actual result set and whether a chart would materially improve the answer.
+- If the user explicitly requested a visualization, default to should_visualize=true unless no coherent, useful chart can be justified.
+- If the user did not explicitly request a visualization, only set should_visualize=true when the chart adds clear value beyond a short textual answer.
+- Never force a chart from detail rows, noisy records, or semantically weak axes.
+- If should_visualize=true, choose one chart type and exact x/y fields from the result keys.
+- Allowed chart_type values: "bar", "line".
+- y_field must be numeric or numeric-like in the results.
+- x_field must be a real key from the results that makes semantic sense for the question.
+- analysis_goal should be a short phrase like "compare top vendors" or "show year-over-year trend".
+- If should_visualize=false and the user explicitly requested a chart, provide a single-sentence no_graph_explanation.
+- If should_visualize=false and the user did not request a chart, no_graph_explanation should be empty.
+
+Return strict JSON only with this schema:
+{{
+  "should_visualize": true or false,
+  "chart_type": "bar" or "line" or "",
+  "x_field": "<field>" or "",
+  "y_field": "<field>" or "",
+  "analysis_goal": "<short phrase>" or "",
+  "title": "<optional title>" or "",
+  "no_graph_explanation": "<single sentence or empty string>"
+}}"""
+
+        response = self.llm.invoke([HumanMessage(content=prompt)])
+        parsed = self._extract_json_object(str(response.content))
+        if parsed is None:
+            state["visualization_decision"] = self._default_visualization_decision(state, requested=requested)
+        else:
+            state["visualization_decision"] = self._normalize_visualization_decision(parsed, requested=requested)
+
+        print(f"[NODE] Visualization decision: {state['visualization_decision']}")
+        return state
 
     def create_graph(self, state: GraphState) -> GraphState:
         """Kick off visualization creation in background for overlap with answer generation."""
@@ -293,7 +431,8 @@ visualization: <yes/no>"""
                 {
                     "data": graph_state.get("query_results", []),
                     "sql_query": graph_state.get("sql_query", ""),
-                    "title": None
+                    "chart_spec": graph_state.get("visualization_decision", {}),
+                    "title": graph_state.get("visualization_decision", {}).get("title")
                 },
                 graph_state.get("session_id", "default")
             )
@@ -399,6 +538,14 @@ Instructions:
         response = self.llm.invoke([HumanMessage(content=prompt)])
         state["final_answer"] = response.content
 
+        decision = state.get("visualization_decision", {})
+        if (
+            state.get("wants_visualization", False)
+            and not decision.get("should_visualize")
+            and decision.get("no_graph_explanation")
+        ):
+            state["final_answer"] = f"{state['final_answer']} {decision['no_graph_explanation']}".strip()
+
         # If a background graph job exists for this session, resolve it now.
         session_id = state.get("session_id", "default")
         graph_future = None
@@ -413,6 +560,16 @@ Instructions:
                     print(f"[NODE] Graph created successfully")
             except Exception as e:
                 print(f"[NODE] Graph generation failed: {e}", file=sys.stderr)
+
+        if (
+            state.get("wants_visualization", False)
+            and not state.get("graph_data")
+            and not decision.get("no_graph_explanation")
+        ):
+            state["final_answer"] = (
+                f"{state['final_answer']} "
+                "I couldn't produce a graph that matched these results cleanly without risking a misleading chart."
+            ).strip()
 
         state["visualization_status"] = "created" if state.get("graph_data") else "not_created"
 

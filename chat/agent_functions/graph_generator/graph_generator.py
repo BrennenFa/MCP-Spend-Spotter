@@ -6,7 +6,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import base64
 from io import BytesIO
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 import re
 import math
 
@@ -55,11 +55,8 @@ def detect_graph_type(results: List[Dict], query: str) -> str:
     if 'SELECT *' in query_upper:
         return "bar"
 
-    # Check for time series data - look for 'fiscal_year' or 'year' in any key
-    has_time_col = any('fiscal_year' in str(key).lower() or 'year' in str(key).lower()
-                       for key in results[0].keys())
-
-    if has_time_col and len(results) >= 4:
+    independent_var, _, is_time_series = _select_plot_columns(results, query)
+    if independent_var and is_time_series and len(results) >= 4:
         return "line"
 
 
@@ -102,7 +99,164 @@ def _parse_numeric(value) -> Optional[float]:
     return None
 
 
-def _select_plot_columns(results: List[Dict]) -> Tuple[Optional[str], Optional[str], bool]:
+def _normalize_chart_type(chart_type: str) -> str:
+    """Normalize supported chart types."""
+    normalized = (chart_type or "").strip().lower()
+    return normalized if normalized in {"bar", "line"} else ""
+
+
+def _looks_like_time_value(value) -> bool:
+    """Detect whether a value looks like a time-series label."""
+    if value is None:
+        return False
+
+    if isinstance(value, (int, float)):
+        numeric = int(value)
+        return 1900 <= numeric <= 2100
+
+    if not isinstance(value, str):
+        return False
+
+    text = value.strip()
+    if not text:
+        return False
+
+    if re.fullmatch(r"(19|20)\d{2}", text):
+        return True
+
+    if re.fullmatch(r"(19|20)\d{2}[-/](0[1-9]|1[0-2])", text):
+        return True
+
+    if re.fullmatch(r"(0[1-9]|1[0-2])[-/](19|20)\d{2}", text):
+        return True
+
+    lowered = text.lower()
+    month_tokens = [
+        "jan", "feb", "mar", "apr", "may", "jun",
+        "jul", "aug", "sep", "oct", "nov", "dec",
+        "q1", "q2", "q3", "q4"
+    ]
+    return any(token in lowered for token in month_tokens)
+
+
+def _is_time_series_column(column_name: str, values: List[object]) -> bool:
+    """Require both a time-like name and mostly time-like values."""
+    column_lower = column_name.lower()
+    if not any(token in column_lower for token in ["year", "date", "month", "quarter"]):
+        return False
+
+    non_empty_values = [value for value in values if value not in (None, "")]
+    if len(non_empty_values) < 3:
+        return False
+
+    time_like = sum(1 for value in non_empty_values if _looks_like_time_value(value))
+    return time_like >= max(3, int(len(non_empty_values) * 0.7))
+
+
+def _is_dimension_column(column_name: str) -> bool:
+    """Prefer descriptive grouping columns over IDs and metric columns."""
+    column_lower = column_name.lower()
+    if column_lower == "id" or column_lower.endswith("_id"):
+        return False
+
+    bad_tokens = [
+        "amount", "total", "sum", "avg", "average", "count", "min", "max",
+        "payment", "payments", "expenditure", "expenditures", "receipt", "receipts",
+        "appropriation", "appropriations", "value", "percent", "ratio", "rank"
+    ]
+    return not any(token in column_lower for token in bad_tokens)
+
+
+def _choose_categorical_dimension(keys: List[str], dependent_var: str) -> Optional[str]:
+    """Pick the best non-metric column for grouped comparisons."""
+    preferred_tokens = [
+        "agency", "department", "vendor", "payee", "recipient", "program",
+        "category", "fund", "account", "purpose", "object", "name", "type"
+    ]
+
+    candidates = [key for key in keys if key != dependent_var and _is_dimension_column(key)]
+    for token in preferred_tokens:
+        for candidate in candidates:
+            if token in candidate.lower():
+                return candidate
+
+    if candidates:
+        return candidates[0]
+
+    for key in keys:
+        if key != dependent_var:
+            return key
+    return None
+
+
+def _query_mentions_time_series(query: str) -> bool:
+    """Detect whether the query is asking for a trend over time."""
+    lowered = query.lower()
+    return any(token in lowered for token in [
+        "over time", "trend", "by year", "per year", "across years",
+        "year over year", "monthly", "by month", "per month",
+        "quarterly", "by quarter", "per quarter", "timeline"
+    ])
+
+
+def _is_sorted_time_series(values: List[object]) -> bool:
+    """Time series are usually ordered; reject arbitrary repeated year labels."""
+    normalized = []
+    for value in values:
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            normalized.append(str(int(value)))
+        else:
+            normalized.append(str(value).strip())
+
+    if len(set(normalized)) < 3:
+        return False
+
+    return normalized == sorted(normalized) or normalized == sorted(normalized, reverse=True)
+
+
+def validate_chart_spec(results: List[Dict], chart_spec: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    """Validate a chart spec against the result schema and values."""
+    if not results or not chart_spec or not isinstance(chart_spec, dict):
+        return None
+
+    chart_type = _normalize_chart_type(str(chart_spec.get("chart_type", "")))
+    x_field = str(chart_spec.get("x_field", "")).strip()
+    y_field = str(chart_spec.get("y_field", "")).strip()
+    analysis_goal = str(
+        chart_spec.get("analysis_goal") or chart_spec.get("aggregation_intent") or ""
+    ).strip()
+    title = str(chart_spec.get("title", "")).strip()
+
+    if not chart_type or not x_field or not y_field or not analysis_goal:
+        return None
+
+    keys = list(results[0].keys())
+    if x_field not in keys or y_field not in keys or x_field == y_field:
+        return None
+
+    sample_size = min(len(results), 50)
+    y_values = [row.get(y_field) for row in results[:sample_size]]
+    numeric_count = sum(1 for value in y_values if _parse_numeric(value) is not None)
+    if numeric_count < max(2, int(sample_size * 0.6)):
+        return None
+
+    if chart_type == "line":
+        x_values = [row.get(x_field) for row in results[:sample_size]]
+        if not _is_time_series_column(x_field, x_values) or not _is_sorted_time_series(x_values):
+            return None
+
+    return {
+        "chart_type": chart_type,
+        "x_field": x_field,
+        "y_field": y_field,
+        "analysis_goal": analysis_goal,
+        "title": title,
+    }
+
+
+def _select_plot_columns(results: List[Dict], query: str = "") -> Tuple[Optional[str], Optional[str], bool]:
     """
     Choose independent/dependent columns more intelligently than first-two-columns.
     Returns (independent_var, dependent_var, is_time_series).
@@ -142,32 +296,31 @@ def _select_plot_columns(results: List[Dict]) -> Tuple[Optional[str], Optional[s
     if dependent_var is None:
         dependent_var = numeric_candidates[0]
 
-    # Prefer time series x-axis when available
+    column_values = {
+        key: [row.get(key) for row in results[:sample_size]]
+        for key in keys
+    }
+
     time_columns = [
         key for key in keys
-        if key != dependent_var and any(t in key.lower() for t in ["year", "date", "month", "quarter"])
+        if key != dependent_var and _is_time_series_column(key, column_values[key])
     ]
-    if time_columns:
-        return time_columns[0], dependent_var, True
+    query_wants_time = _query_mentions_time_series(query)
 
-    # Otherwise pick first non-ID-ish column
-    independent_var = None
-    for key in keys:
-        key_lower = key.lower()
-        if key == dependent_var:
-            continue
-        if key_lower == "id" or key_lower.endswith("_id"):
-            continue
-        independent_var = key
-        break
+    if query_wants_time:
+        for time_column in time_columns:
+            if _is_sorted_time_series(column_values[time_column]):
+                return time_column, dependent_var, True
 
-    if independent_var is None:
-        for key in keys:
-            if key != dependent_var:
-                independent_var = key
-                break
+    categorical_dimension = _choose_categorical_dimension(keys, dependent_var)
+    if categorical_dimension:
+        return categorical_dimension, dependent_var, False
 
-    return independent_var, dependent_var, False
+    for time_column in time_columns:
+        if _is_sorted_time_series(column_values[time_column]):
+            return time_column, dependent_var, True
+
+    return None, dependent_var, False
 
 
 def _aggregate_points_for_display(
@@ -320,7 +473,8 @@ def generate_graph(
     results: List[Dict],
     query: str = "",
     graph_type: str = "auto",
-    title: Optional[str] = None
+    title: Optional[str] = None,
+    chart_spec: Optional[Dict[str, Any]] = None
 ) -> Optional[str]:
     """
     Generate a graph from SQL query results.
@@ -330,11 +484,21 @@ def generate_graph(
         query: Original SQL query (for context)
         graph_type: "bar", "line", or "auto" (default)
         title: Optional custom title
+        chart_spec: Approved chart specification from the visualization gate
 
     Returns:
         Base64-encoded PNG image string, or None if graph shouldn't be generated
     """
     if not results:
+        return None
+
+    valid_chart_spec = validate_chart_spec(results, chart_spec)
+    if valid_chart_spec:
+        graph_type = valid_chart_spec["chart_type"]
+        independent_var = valid_chart_spec["x_field"]
+        dependent_var = valid_chart_spec["y_field"]
+        title = valid_chart_spec["title"] or title
+    elif chart_spec:
         return None
 
     # Auto-detect graph type if requested
@@ -344,9 +508,14 @@ def generate_graph(
     if graph_type == "none":
         return None
 
-    independent_var, dependent_var, is_time_series = _select_plot_columns(results)
-    if not independent_var or not dependent_var:
-        return None
+    is_time_series = False
+    if not valid_chart_spec:
+        independent_var, dependent_var, is_time_series = _select_plot_columns(results, query)
+        if not independent_var or not dependent_var:
+            return None
+    else:
+        x_values = [row.get(independent_var) for row in results]
+        is_time_series = graph_type == "line" and _is_time_series_column(independent_var, x_values)
 
     # Extract as 2D array: each point is [independent_var_value, dependent_var_value]
     points = []
@@ -421,4 +590,3 @@ def generate_graph(
     plt.close(fig)
 
     return image_base64
-

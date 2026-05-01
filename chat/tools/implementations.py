@@ -4,7 +4,7 @@
 import sqlite3
 import json
 from pathlib import Path
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 from chat.agent_functions.graph_generator import generate_graph
 import chromadb
 from pathlib import Path
@@ -86,7 +86,12 @@ def execute_budget_query(query: str) -> list[dict]:
         conn.close()
 
 
-def create_graph_from_results(results: List[Dict], query: str, title: str = None) -> Dict[str, Any]:
+def create_graph_from_results(
+    results: List[Dict],
+    query: str,
+    title: str = None,
+    chart_spec: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     Create a graph from query results.
 
@@ -94,6 +99,7 @@ def create_graph_from_results(results: List[Dict], query: str, title: str = None
         results: Query results as list of dicts
         query: SQL query that generated the results
         title: Optional custom title
+        chart_spec: Approved chart specification
 
     Returns:
         Dict with base64 image and metadata
@@ -105,7 +111,13 @@ def create_graph_from_results(results: List[Dict], query: str, title: str = None
 
     try:
         # Generate the graph
-        image_base64 = generate_graph(results, query=query, graph_type="auto", title=title)
+        image_base64 = generate_graph(
+            results,
+            query=query,
+            graph_type="auto",
+            title=title,
+            chart_spec=chart_spec
+        )
 
         if not image_base64:
             return {

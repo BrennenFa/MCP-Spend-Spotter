@@ -79,8 +79,9 @@ def handle_create_graph(arguments: dict[str, Any]) -> dict[str, Any]:
         results = arguments["results"]
         query = arguments["query"]
         title = arguments.get("title")
+        chart_spec = arguments.get("chart_spec")
 
-        graph_result = create_graph_from_results(results, query, title)
+        graph_result = create_graph_from_results(results, query, title, chart_spec)
 
         return {
             "content": [

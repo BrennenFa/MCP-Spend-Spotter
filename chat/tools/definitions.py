@@ -53,6 +53,10 @@ TOOLS = [
                         "type": "string",
                         "description": "The SQL query that generated these results (for context in choosing graph type)"
                     },
+                    "chart_spec": {
+                        "type": "object",
+                        "description": "Approved chart specification including chart_type, x_field, y_field, analysis_goal, and optional title."
+                    },
                     "title": {
                         "type": "string",
                         "description": "Optional custom title for the graph. If not provided, will auto-generate from data."

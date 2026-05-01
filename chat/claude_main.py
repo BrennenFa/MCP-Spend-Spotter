@@ -76,6 +76,7 @@ class ClaudeAgentSystem:
         workflow.add_node("route_question", self.nodes.route_question)
         workflow.add_node("query_sql", self.nodes.query_sql)
         workflow.add_node("validate_query", self.nodes.validate_query)
+        workflow.add_node("assess_visualization", self.nodes.assess_visualization)
         workflow.add_node("route_visualization", lambda state: state)  # Pass-through node for routing
         workflow.add_node("create_graph", self.nodes.create_graph)
         workflow.add_node("query_budget_context", self.nodes.query_budget_context)
@@ -105,9 +106,11 @@ class ClaudeAgentSystem:
             self.nodes.query_validate_route,
             {
                 "retry_query": "query_sql",
-                "continue": "route_visualization"
+                "continue": "assess_visualization"
             }
         )
+
+        workflow.add_edge("assess_visualization", "route_visualization")
         
         # After validation, route to visualization or response
         workflow.add_conditional_edges(
@@ -168,6 +171,7 @@ class ClaudeAgentSystem:
             "sql_query": "",
             "graph_data": "",
             "visualization_status": "not_created",
+            "visualization_decision": {},
             "context_data": "",
             "citations": [],
             "final_answer": "",
