@@ -169,6 +169,7 @@ class ClaudeAgentSystem:
             "wants_visualization": False,
             "query_results": [],
             "sql_query": "",
+            "query_explanation": "",
             "graph_data": "",
             "visualization_status": "not_created",
             "visualization_decision": {},

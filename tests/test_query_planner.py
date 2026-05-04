@@ -101,6 +101,15 @@ class TestSelectTool:
         tool = select_tool(sql)
         assert tool == "query_vendor_payments"
 
+    def test_select_tool_vendor_views(self):
+        """Test that normalized vendor views still route to vendor tool."""
+        for sql in [
+            "SELECT * FROM vendor_only_payments",
+            "SELECT * FROM vendor_payments_normalized",
+            "SELECT * FROM agency_rollup_payments",
+        ]:
+            assert select_tool(sql) == "query_vendor_payments"
+
 
 class TestGenerateSQLWithLLM:
     """Test LLM-based SQL generation."""
@@ -247,6 +256,57 @@ class TestExplainQueryResults:
 
         assert "1 result" in explanation
         assert "results" not in explanation  # Should be singular
+
+    def test_explain_query_results_mentions_single_year_scope(self):
+        """Test explanation adds explicit fiscal-year scope."""
+        results = [{"fiscal_year": "2026", "entity_type": "vendor"}]
+        explanation = explain_query_results(
+            "top vendors",
+            "SELECT * FROM vendor_only_payments WHERE fiscal_year = '2026'",
+            results,
+            "query_vendor_payments",
+        )
+
+        assert "fiscal year 2026" in explanation.lower()
+
+    def test_explain_query_results_mentions_multi_year_scope(self):
+        """Test explanation calls out multi-year result sets."""
+        results = [{"fiscal_year": "2025"}, {"fiscal_year": "2026"}]
+        explanation = explain_query_results(
+            "show all payments",
+            "SELECT * FROM vendor_payments_normalized",
+            results,
+            "query_vendor_payments",
+        )
+
+        assert "spans multiple fiscal years" in explanation.lower()
+
+    def test_explain_query_results_warns_about_non_vendor_payees(self):
+        """Test explanation warns when vendor query includes non-vendor types."""
+        results = [
+            {"fiscal_year": "2026", "entity_type": "vendor"},
+            {"fiscal_year": "2026", "entity_type": "benefit_recipient"},
+        ]
+        explanation = explain_query_results(
+            "top vendors",
+            "SELECT * FROM vendor_payments_normalized",
+            results,
+            "query_vendor_payments",
+        )
+
+        assert "non-vendor payee types" in explanation.lower()
+
+    def test_explain_query_results_notes_agency_rollup(self):
+        """Test explanation notes parent-agency rollups."""
+        results = [{"fiscal_year": "2026", "parent_agency": "Department Of Transportation"}]
+        explanation = explain_query_results(
+            "compare departments",
+            "SELECT * FROM agency_rollup_payments",
+            results,
+            "query_vendor_payments",
+        )
+
+        assert "rolled up to parent agencies" in explanation.lower()
 
     def test_explain_query_results_empty(self):
         """Test explanation when no results found."""

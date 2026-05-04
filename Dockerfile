@@ -36,6 +36,9 @@ RUN python download_models.py
 # Copy application code
 COPY . .
 
+# Rebuild normalized SQLite databases during image build. TODO fix
+RUN python DataManage/sql_init.py
+
 # Make startup script executable
 RUN chmod +x start.sh
 
