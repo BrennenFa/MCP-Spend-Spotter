@@ -2,7 +2,6 @@
 db/
 venv
 S3-old/
-data/
 plan/
 __pycache__/
 frontend/node_modules
